@@ -6,20 +6,16 @@
 *.pth filter=lfs diff=lfs merge=lfs -text
 *.h5 filter=lfs diff=lfs merge=lfs -text
 *.hdf5 filter=lfs diff=lfs merge=lfs -text
-
 # Archive files
 *.zip filter=lfs diff=lfs merge=lfs -text
 *.tar.gz filter=lfs diff=lfs merge=lfs -text
 *.tgz filter=lfs diff=lfs merge=lfs -text
-
 # Large data files
 *.csv filter=lfs diff=lfs merge=lfs -text
 data/SMSSpamCollection filter=lfs diff=lfs merge=lfs -text
-
 # Image files (if any)
 *.png filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
 *.jpeg filter=lfs diff=lfs merge=lfs -text
-
 # Notebook checkpoints and outputs (large files)
 *.ipynb filter=lfs diff=lfs merge=lfs -text 
