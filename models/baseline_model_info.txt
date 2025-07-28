@@ -1,0 +1,49 @@
+Best Baseline Model: SVM
+Trained: 2025-07-26 12:20:16
+Accuracy: 0.9838
+
+Model Parameters:
+  memory: None
+  steps: [('tfidf', TfidfVectorizer(max_features=5000, ngram_range=(1, 2), stop_words='english',
+                strip_accents='unicode')), ('svm', SVC(kernel='linear', probability=True, random_state=42))]
+  transform_input: None
+  verbose: False
+  tfidf: TfidfVectorizer(max_features=5000, ngram_range=(1, 2), stop_words='english',
+                strip_accents='unicode')
+  svm: SVC(kernel='linear', probability=True, random_state=42)
+  tfidf__analyzer: word
+  tfidf__binary: False
+  tfidf__decode_error: strict
+  tfidf__dtype: <class 'numpy.float64'>
+  tfidf__encoding: utf-8
+  tfidf__input: content
+  tfidf__lowercase: True
+  tfidf__max_df: 1.0
+  tfidf__max_features: 5000
+  tfidf__min_df: 1
+  tfidf__ngram_range: (1, 2)
+  tfidf__norm: l2
+  tfidf__preprocessor: None
+  tfidf__smooth_idf: True
+  tfidf__stop_words: english
+  tfidf__strip_accents: unicode
+  tfidf__sublinear_tf: False
+  tfidf__token_pattern: (?u)\b\w\w+\b
+  tfidf__tokenizer: None
+  tfidf__use_idf: True
+  tfidf__vocabulary: None
+  svm__C: 1.0
+  svm__break_ties: False
+  svm__cache_size: 200
+  svm__class_weight: None
+  svm__coef0: 0.0
+  svm__decision_function_shape: ovr
+  svm__degree: 3
+  svm__gamma: scale
+  svm__kernel: linear
+  svm__max_iter: -1
+  svm__probability: True
+  svm__random_state: 42
+  svm__shrinking: True
+  svm__tol: 0.001
+  svm__verbose: False
