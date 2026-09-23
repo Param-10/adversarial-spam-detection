@@ -114,11 +114,11 @@ class WeightedTrainer(Trainer):
         
         return (loss, outputs) if return_outputs else loss
 
-def fine_tune_bert_enhanced(train_dataset, test_dataset, class_weights=None, 
+def fine_tune_bert_enhanced(train_dataset, val_dataset, class_weights=None, 
                            output_dir='models/bert_enhanced_classifier', 
                            model_name='bert-base-uncased', num_epochs=3, 
                            batch_size=16, learning_rate=2e-5):
-    """Enhanced BERT fine-tuning with class balancing."""
+    """Enhanced BERT fine-tuning with class balancing and validation-based checkpointing."""
     print(f"Enhanced fine-tuning {model_name} for spam classification...")
     
     # Load tokenizer and model
@@ -153,13 +153,13 @@ def fine_tune_bert_enhanced(train_dataset, test_dataset, class_weights=None,
         report_to=None,  # Disable wandb logging
     )
     
-    # Create enhanced trainer with class weights
+    # Create enhanced trainer with class weights, evaluating on validation set
     trainer = WeightedTrainer(
         class_weights=class_weights,
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=test_dataset,
+        eval_dataset=val_dataset,
         compute_metrics=compute_metrics_enhanced,
     )
     
@@ -167,8 +167,8 @@ def fine_tune_bert_enhanced(train_dataset, test_dataset, class_weights=None,
     print("Starting enhanced training...")
     trainer.train()
     
-    # Evaluate
-    print("Evaluating enhanced model...")
+    # Evaluate on validation set
+    print("Evaluating enhanced model on validation set...")
     eval_results = trainer.evaluate()
     
     # Save the model
@@ -183,7 +183,8 @@ def main():
     """Enhanced training pipeline."""
     parser = argparse.ArgumentParser(description='Enhanced BERT fine-tuning for SMS spam')
     parser.add_argument('--train', default='data/train.csv', help='Training data path')
-    parser.add_argument('--test', default='data/test.csv', help='Test data path')
+    parser.add_argument('--val', default=None, help='Validation data path (optional, will split train if omitted)')
+    parser.add_argument('--test', default='data/test.csv', help='Test data path (untouched holdout)')
     parser.add_argument('--output', default='models/bert_enhanced_classifier', help='Output directory')
     parser.add_argument('--model', default='bert-base-uncased', help='Pre-trained model name')
     parser.add_argument('--epochs', type=int, default=4, help='Number of training epochs')
@@ -197,18 +198,42 @@ def main():
     print("Enhanced BERT Fine-tuning for SMS Spam Classification")
     print("="*60)
     
-    # Load data
+    # Load data with strict train/val/test partitioning
     train_df = pd.read_csv(args.train)
     test_df = pd.read_csv(args.test)
     
-    print(f"Training class distribution:")
-    print(train_df['label'].value_counts())
+    if args.val and os.path.exists(args.val):
+        val_df = pd.read_csv(args.val)
+    elif os.path.exists('data/val.csv'):
+        val_df = pd.read_csv('data/val.csv')
+    else:
+        from sklearn.model_selection import train_test_split
+        train_split, val_split = train_test_split(
+            train_df, test_size=0.15, random_state=42, stratify=train_df['label']
+        )
+        train_df = train_split.reset_index(drop=True)
+        val_df = val_split.reset_index(drop=True)
+
+    # Check for duplicate message leakage across partitions
+    train_msgs = set(train_df['message'].astype(str))
+    val_msgs = set(val_df['message'].astype(str))
+    test_msgs = set(test_df['message'].astype(str))
+
+    leak_train_val = train_msgs.intersection(val_msgs)
+    leak_train_test = train_msgs.intersection(test_msgs)
+    if leak_train_val or leak_train_test:
+        train_df = train_df[~train_df['message'].astype(str).isin(leak_train_val | leak_train_test)].reset_index(drop=True)
+    
+    print(f"Training samples: {len(train_df)}")
+    print(f"Validation samples: {len(val_df)}")
+    print(f"Test samples (untouched): {len(test_df)}")
     
     # Create tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     
     # Create datasets
     train_dataset = SMSDataset(train_df['message'], train_df['label'], tokenizer, args.max_length)
+    val_dataset = SMSDataset(val_df['message'], val_df['label'], tokenizer, args.max_length)
     test_dataset = SMSDataset(test_df['message'], test_df['label'], tokenizer, args.max_length)
     
     # Compute class weights if requested
@@ -217,17 +242,24 @@ def main():
         class_weights = compute_class_weights(train_df['label'].values)
         print(f"Class weights: {class_weights}")
     
-    # Enhanced fine-tuning
+    # Enhanced fine-tuning using validation dataset
     trainer, eval_results = fine_tune_bert_enhanced(
-        train_dataset, test_dataset, class_weights, args.output, args.model,
+        train_dataset, val_dataset, class_weights, args.output, args.model,
         args.epochs, args.batch_size, args.learning_rate
     )
     
     print(f"Enhanced BERT training complete!")
-    print(f"Final evaluation results:")
+    print(f"Validation evaluation results:")
     for key, value in eval_results.items():
         if key.startswith('eval_'):
             print(f"  {key}: {value:.4f}")
+
+    # Final held-out evaluation on test set
+    print("\nEvaluating on untouched test set...")
+    test_metrics = trainer.evaluate(test_dataset)
+    for key, value in test_metrics.items():
+        if key.startswith('eval_'):
+            print(f"  test_{key[5:]}: {value:.4f}")
 
 if __name__ == "__main__":
     main() 

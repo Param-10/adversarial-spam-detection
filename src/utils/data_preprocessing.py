@@ -112,56 +112,79 @@ def preprocess_dataset(df):
     
     return df_clean
 
-def split_and_save_data(df, test_size=0.2, random_state=42, output_dir='data'):
+def split_and_save_data(df, val_size=0.15, test_size=0.15, random_state=42, output_dir='data'):
     """
-    Split dataset into train/test and save to CSV files.
+    Split dataset into separate train, validation, and untouched test partitions,
+    and verify zero cross-partition duplicate message leakage.
     
     Args:
         df (pd.DataFrame): Preprocessed dataset
-        test_size (float): Fraction of data for testing
+        val_size (float): Fraction of data for validation (checkpoint selection)
+        test_size (float): Fraction of data for final held-out testing
         random_state (int): Random seed for reproducibility
-        output_dir (str): Directory to save train.csv and test.csv
+        output_dir (str): Directory to save train.csv, val.csv, and test.csv
     """
-    print(f"Splitting dataset: {(1-test_size)*100:.0f}% train, {test_size*100:.0f}% test")
+    train_size = 1.0 - val_size - test_size
+    print(f"Splitting dataset: {train_size*100:.0f}% train, {val_size*100:.0f}% val, {test_size*100:.0f}% test")
     
-    # Split the data
-    X = df['message']
-    y = df['label_binary']
+    # Check for duplicates within the dataset
+    initial_len = len(df)
+    df_dedup = df.drop_duplicates(subset=['message']).copy()
+    if len(df_dedup) < initial_len:
+        print(f"Deduplicated messages: removed {initial_len - len(df_dedup)} duplicate rows to prevent leakage")
     
-    X_train, X_test, y_train, y_test = train_test_split(
+    X = df_dedup['message']
+    y = df_dedup['label_binary']
+    
+    # First split off the untouched test set
+    X_train_val, X_test, y_train_val, y_test = train_test_split(
         X, y, test_size=test_size, random_state=random_state, stratify=y
     )
     
-    # Create train and test DataFrames
-    train_df = pd.DataFrame({
-        'message': X_train,
-        'label': y_train
-    })
+    # Next split the train and validation sets
+    relative_val_size = val_size / (train_size + val_size)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train_val, y_train_val, test_size=relative_val_size, random_state=random_state, stratify=y_train_val
+    )
     
-    test_df = pd.DataFrame({
-        'message': X_test,
-        'label': y_test
-    })
+    # Assert zero cross-partition overlap
+    train_msgs = set(X_train)
+    val_msgs = set(X_val)
+    test_msgs = set(X_test)
+    
+    assert len(train_msgs.intersection(val_msgs)) == 0, "Data leakage detected: message overlap between train and val"
+    assert len(train_msgs.intersection(test_msgs)) == 0, "Data leakage detected: message overlap between train and test"
+    assert len(val_msgs.intersection(test_msgs)) == 0, "Data leakage detected: message overlap between val and test"
+    print("Partition integrity verified: 0 message overlap across train, val, and test.")
+    
+    # Create DataFrames
+    train_df = pd.DataFrame({'message': X_train, 'label': y_train})
+    val_df = pd.DataFrame({'message': X_val, 'label': y_val})
+    test_df = pd.DataFrame({'message': X_test, 'label': y_test})
     
     # Save to CSV files
     os.makedirs(output_dir, exist_ok=True)
-    
     train_path = os.path.join(output_dir, 'train.csv')
+    val_path = os.path.join(output_dir, 'val.csv')
     test_path = os.path.join(output_dir, 'test.csv')
     
     train_df.to_csv(train_path, index=False)
+    val_df.to_csv(val_path, index=False)
     test_df.to_csv(test_path, index=False)
     
     print(f"Train set saved: {train_path} ({len(train_df)} samples)")
+    print(f"Validation set saved: {val_path} ({len(val_df)} samples)")
     print(f"Test set saved: {test_path} ({len(test_df)} samples)")
     
     # Print distribution
     print("\nTrain set distribution:")
     print(train_df['label'].value_counts())
+    print("\nValidation set distribution:")
+    print(val_df['label'].value_counts())
     print("\nTest set distribution:")
     print(test_df['label'].value_counts())
     
-    return train_df, test_df
+    return train_df, val_df, test_df
 
 def main():
     """Main preprocessing pipeline."""
@@ -173,8 +196,8 @@ def main():
     # Clean and preprocess
     df_clean = preprocess_dataset(df)
     
-    # Split and save
-    train_df, test_df = split_and_save_data(df_clean)
+    # Split and save 3-way partitions
+    train_df, val_df, test_df = split_and_save_data(df_clean)
     
     print("\nData preprocessing complete!")
 

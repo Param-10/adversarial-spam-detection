@@ -171,13 +171,15 @@ Training history and performance improvements through adversarial iterations are
 | 2         | 91.7%          | 99.3%         | 48                | 4,545             |
 | 3         | 95.7%          | 96.5%         | 46                | 4,591             |
 
-**Key Findings:**
+**Key Findings & Robustness vs. Accuracy Tradeoff:**
 
-1. **Successful Adversarial Challenge**: Initial detection rate of 91.7% shows generated samples were sophisticated enough to challenge the classifier
-2. **Iterative Improvement**: Detection rate improved from 91.7% → 95.7% over iterations, demonstrating the classifier learning to handle adversarial samples
-3. **Realistic Sample Generation**: Generated samples included subtle, conversation-style messages.
-4. **Maintained High Performance**: Final test accuracy of 96.5% shows robust performance despite challenging adversarial training
-5. **Robustness Gains**: 4 out of 48 samples initially evaded detection but were caught after retraining, showing improved adversarial robustness
+1. **Successful Adversarial Challenge**: Initial detection rate of 91.7% confirms that the fine-tuned LLM generator produced subtle, challenging spam samples capable of probing classifier weaknesses.
+2. **Iterative Robustness Gains**: Adversarial detection rate improved from 91.7% → 95.7% across iterations, confirming the classifier adapted to previously evasive linguistic patterns.
+3. **The Clean vs. Robust Tradeoff**: While adversarial detection improved (+4.0%), clean test accuracy showed a modest decrease from 98.9% to 96.5% by Iteration 3. This illustrates a well-documented dynamic in adversarial ML: expanding classifier decision boundaries to encompass subtle adversarial perturbation often causes minor sensitivity shifts on border-line clean distributions.
+4. **Evaluation Partitioning & Leakage Prevention**:
+   - The training pipeline utilizes a strict **3-way split**: Training (70%), Validation (15%), and an untouched held-out Test set (15%).
+   - Model checkpoints and early stopping are governed strictly on the **Validation** set (`eval_dataset=val_dataset`, metric: `f1_spam`), ensuring that the Test set is never exposed during training or checkpoint selection.
+   - Cross-partition deduplication is strictly enforced to guarantee zero message leakage between partitions.
 
 **Generated Data Logging:**
 

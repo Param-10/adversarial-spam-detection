@@ -52,17 +52,55 @@ class SMSDataset(Dataset):
             'labels': torch.tensor(label, dtype=torch.long)
         }
 
-def load_data(train_path='data/train.csv', test_path='data/test.csv'):
-    """Load preprocessed training and testing data."""
+def load_data(train_path='data/train.csv', test_path='data/test.csv', val_path=None, val_ratio=0.15, random_state=42):
+    """
+    Load preprocessed data with strict train/val/test separation and duplicate checking.
+    The test partition is kept strictly untouched for final evaluation.
+    """
     print("Loading preprocessed data...")
-    
     train_df = pd.read_csv(train_path)
     test_df = pd.read_csv(test_path)
     
-    print(f"Train set: {len(train_df)} samples")
-    print(f"Test set: {len(test_df)} samples")
+    # Resolve validation set
+    if val_path and os.path.exists(val_path):
+        val_df = pd.read_csv(val_path)
+        print(f"Loaded validation set from {val_path}")
+    elif os.path.exists('data/val.csv'):
+        val_df = pd.read_csv('data/val.csv')
+        print("Loaded validation set from data/val.csv")
+    else:
+        from sklearn.model_selection import train_test_split
+        print(f"Validation set not found. Splitting {val_ratio*100:.0f}% from train set...")
+        train_split, val_split = train_test_split(
+            train_df, test_size=val_ratio, random_state=random_state, stratify=train_df['label']
+        )
+        train_df = train_split.reset_index(drop=True)
+        val_df = val_split.reset_index(drop=True)
+
+    # Check for duplicate message leakage across partitions
+    train_msgs = set(train_df['message'].astype(str))
+    val_msgs = set(val_df['message'].astype(str))
+    test_msgs = set(test_df['message'].astype(str))
+
+    leak_train_val = train_msgs.intersection(val_msgs)
+    leak_train_test = train_msgs.intersection(test_msgs)
+    leak_val_test = val_msgs.intersection(test_msgs)
+
+    if leak_train_val:
+        print(f"⚠️ Warning: Found {len(leak_train_val)} duplicate messages between train and val. Removing from train.")
+        train_df = train_df[~train_df['message'].astype(str).isin(leak_train_val)].reset_index(drop=True)
+    if leak_train_test:
+        print(f"⚠️ Warning: Found {len(leak_train_test)} duplicate messages between train and test. Removing from train.")
+        train_df = train_df[~train_df['message'].astype(str).isin(leak_train_test)].reset_index(drop=True)
+    if leak_val_test:
+        print(f"⚠️ Warning: Found {len(leak_val_test)} duplicate messages between val and test. Removing from val.")
+        val_df = val_df[~val_df['message'].astype(str).isin(leak_val_test)].reset_index(drop=True)
+
+    print(f"Train set (training): {len(train_df)} samples")
+    print(f"Validation set (checkpoint selection): {len(val_df)} samples")
+    print(f"Test set (untouched held-out evaluation): {len(test_df)} samples")
     
-    return train_df, test_df
+    return train_df, val_df, test_df
 
 def compute_metrics(eval_pred: EvalPrediction):
     """Compute metrics for evaluation."""
@@ -87,22 +125,25 @@ def compute_metrics(eval_pred: EvalPrediction):
         'recall_spam': recall_spam[1] if len(recall_spam) > 1 else 0.0,
     }
 
-def create_data_loaders(train_df, test_df, tokenizer, batch_size=16, max_length=128):
-    """Create PyTorch data loaders."""
+def create_data_loaders(train_df, val_df, test_df, tokenizer, batch_size=16, max_length=128):
+    """Create PyTorch data loaders for train, validation, and test sets."""
     print("Creating data loaders...")
     
     train_dataset = SMSDataset(
         train_df['message'], train_df['label'], tokenizer, max_length
     )
+    val_dataset = SMSDataset(
+        val_df['message'], val_df['label'], tokenizer, max_length
+    )
     test_dataset = SMSDataset(
         test_df['message'], test_df['label'], tokenizer, max_length
     )
     
-    return train_dataset, test_dataset
+    return train_dataset, val_dataset, test_dataset
 
-def fine_tune_bert(train_dataset, test_dataset, output_dir='models/bert_spam_classifier', 
+def fine_tune_bert(train_dataset, val_dataset, output_dir='models/bert_spam_classifier', 
                    model_name='bert-base-uncased', num_epochs=3, batch_size=16, learning_rate=2e-5):
-    """Fine-tune BERT model for spam classification."""
+    """Fine-tune BERT model for spam classification using validation set for best-model selection."""
     print(f"Fine-tuning {model_name} for spam classification...")
     
     # Load tokenizer and model
@@ -135,12 +176,12 @@ def fine_tune_bert(train_dataset, test_dataset, output_dir='models/bert_spam_cla
         remove_unused_columns=False,  # Prevent column removal warnings
     )
     
-    # Create trainer
+    # Create trainer with validation dataset for checkpoint selection
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=test_dataset,
+        eval_dataset=val_dataset,
         compute_metrics=compute_metrics,
     )
     
@@ -148,8 +189,8 @@ def fine_tune_bert(train_dataset, test_dataset, output_dir='models/bert_spam_cla
     print("Starting training...")
     trainer.train()
     
-    # Evaluate
-    print("Evaluating model...")
+    # Evaluate on validation set
+    print("Evaluating model on validation set...")
     eval_results = trainer.evaluate()
     
     # Save the model
@@ -239,7 +280,8 @@ def main():
     """Main training pipeline."""
     parser = argparse.ArgumentParser(description='Fine-tune BERT for SMS spam classification')
     parser.add_argument('--train', default='data/train.csv', help='Training data path')
-    parser.add_argument('--test', default='data/test.csv', help='Test data path')
+    parser.add_argument('--val', default=None, help='Validation data path (optional, will split train if omitted)')
+    parser.add_argument('--test', default='data/test.csv', help='Test data path (untouched holdout)')
     parser.add_argument('--output', default='models/bert_spam_classifier', help='Output directory for model')
     parser.add_argument('--model', default='bert-base-uncased', help='Pre-trained model name')
     parser.add_argument('--epochs', type=int, default=3, help='Number of training epochs')
@@ -252,24 +294,24 @@ def main():
     print("Starting BERT Fine-tuning for SMS Spam Classification")
     print("="*60)
     
-    # Load data
-    train_df, test_df = load_data(args.train, args.test)
+    # Load data with strict train/val/test partitioning
+    train_df, val_df, test_df = load_data(args.train, args.test, args.val)
     
     # Create tokenizer for data loading
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     
     # Create datasets
-    train_dataset, test_dataset = create_data_loaders(
-        train_df, test_df, tokenizer, args.batch_size, args.max_length
+    train_dataset, val_dataset, test_dataset = create_data_loaders(
+        train_df, val_df, test_df, tokenizer, args.batch_size, args.max_length
     )
     
-    # Fine-tune BERT
+    # Fine-tune BERT (using validation set for checkpoint selection)
     trainer, eval_results = fine_tune_bert(
-        train_dataset, test_dataset, args.output, args.model,
+        train_dataset, val_dataset, args.output, args.model,
         args.epochs, args.batch_size, args.learning_rate
     )
     
-    # Detailed evaluation
+    # Detailed final evaluation strictly on the untouched test set
     bert_results = evaluate_bert_model(trainer, test_dataset)
     
     # Save results
