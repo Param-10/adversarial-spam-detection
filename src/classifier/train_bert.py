@@ -18,6 +18,11 @@ import os
 import argparse
 from datetime import datetime
 
+if __package__:
+    from .data_splits import load_data
+else:
+    from data_splits import load_data
+
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
@@ -51,56 +56,6 @@ class SMSDataset(Dataset):
             'attention_mask': encoding['attention_mask'].flatten(),
             'labels': torch.tensor(label, dtype=torch.long)
         }
-
-def load_data(train_path='data/train.csv', test_path='data/test.csv', val_path=None, val_ratio=0.15, random_state=42):
-    """
-    Load preprocessed data with strict train/val/test separation and duplicate checking.
-    The test partition is kept strictly untouched for final evaluation.
-    """
-    print("Loading preprocessed data...")
-    train_df = pd.read_csv(train_path)
-    test_df = pd.read_csv(test_path)
-    
-    # Resolve validation set
-    if val_path and os.path.exists(val_path):
-        val_df = pd.read_csv(val_path)
-        print(f"Loaded validation set from {val_path}")
-    elif os.path.exists('data/val.csv'):
-        val_df = pd.read_csv('data/val.csv')
-        print("Loaded validation set from data/val.csv")
-    else:
-        from sklearn.model_selection import train_test_split
-        print(f"Validation set not found. Splitting {val_ratio*100:.0f}% from train set...")
-        train_split, val_split = train_test_split(
-            train_df, test_size=val_ratio, random_state=random_state, stratify=train_df['label']
-        )
-        train_df = train_split.reset_index(drop=True)
-        val_df = val_split.reset_index(drop=True)
-
-    # Check for duplicate message leakage across partitions
-    train_msgs = set(train_df['message'].astype(str))
-    val_msgs = set(val_df['message'].astype(str))
-    test_msgs = set(test_df['message'].astype(str))
-
-    leak_train_val = train_msgs.intersection(val_msgs)
-    leak_train_test = train_msgs.intersection(test_msgs)
-    leak_val_test = val_msgs.intersection(test_msgs)
-
-    if leak_train_val:
-        print(f"⚠️ Warning: Found {len(leak_train_val)} duplicate messages between train and val. Removing from train.")
-        train_df = train_df[~train_df['message'].astype(str).isin(leak_train_val)].reset_index(drop=True)
-    if leak_train_test:
-        print(f"⚠️ Warning: Found {len(leak_train_test)} duplicate messages between train and test. Removing from train.")
-        train_df = train_df[~train_df['message'].astype(str).isin(leak_train_test)].reset_index(drop=True)
-    if leak_val_test:
-        print(f"⚠️ Warning: Found {len(leak_val_test)} duplicate messages between val and test. Removing from val.")
-        val_df = val_df[~val_df['message'].astype(str).isin(leak_val_test)].reset_index(drop=True)
-
-    print(f"Train set (training): {len(train_df)} samples")
-    print(f"Validation set (checkpoint selection): {len(val_df)} samples")
-    print(f"Test set (untouched held-out evaluation): {len(test_df)} samples")
-    
-    return train_df, val_df, test_df
 
 def compute_metrics(eval_pred: EvalPrediction):
     """Compute metrics for evaluation."""
@@ -174,6 +129,7 @@ def fine_tune_bert(train_dataset, val_dataset, output_dir='models/bert_spam_clas
         learning_rate=learning_rate,
         dataloader_pin_memory=False,  # Fix pin_memory warning on Mac
         remove_unused_columns=False,  # Prevent column removal warnings
+        report_to="none",
     )
     
     # Create trainer with validation dataset for checkpoint selection
@@ -323,4 +279,4 @@ def main():
     print(f"\nBERT fine-tuning complete!")
 
 if __name__ == "__main__":
-    main() 
+    main()

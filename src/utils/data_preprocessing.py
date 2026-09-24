@@ -12,21 +12,23 @@ import nltk
 from sklearn.model_selection import train_test_split
 import os
 
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
+def ensure_nltk_data():
+    # Download required NLTK data
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
 
-try:
-    nltk.data.find('tokenizers/punkt_tab')
-except LookupError:
-    nltk.download('punkt_tab')
+    try:
+        nltk.data.find('tokenizers/punkt_tab')
+    except LookupError:
+        nltk.download('punkt_tab')
 
-try:
-    nltk.data.find('corpora/stopwords')
-except LookupError:
-    nltk.download('stopwords')
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        nltk.download('stopwords')
+
 
 from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
@@ -124,12 +126,17 @@ def split_and_save_data(df, val_size=0.15, test_size=0.15, random_state=42, outp
         random_state (int): Random seed for reproducibility
         output_dir (str): Directory to save train.csv, val.csv, and test.csv
     """
+    if not (0 < val_size < 1 and 0 < test_size < 1 and val_size + test_size < 1):
+        raise ValueError('Validation and test fractions must be positive and leave training data')
     train_size = 1.0 - val_size - test_size
     print(f"Splitting dataset: {train_size*100:.0f}% train, {val_size*100:.0f}% val, {test_size*100:.0f}% test")
     
     # Check for duplicates within the dataset
     initial_len = len(df)
-    df_dedup = df.drop_duplicates(subset=['message']).copy()
+    keys = df['message'].str.casefold().str.split().str.join(' ')
+    if df.groupby(keys)['label_binary'].nunique().gt(1).any():
+        raise ValueError('Identical normalized messages have conflicting labels')
+    df_dedup = df.loc[~keys.duplicated()].copy()
     if len(df_dedup) < initial_len:
         print(f"Deduplicated messages: removed {initial_len - len(df_dedup)} duplicate rows to prevent leakage")
     
@@ -190,6 +197,8 @@ def main():
     """Main preprocessing pipeline."""
     print("=== SMS Spam Data Preprocessing ===\n")
     
+    ensure_nltk_data()
+
     # Load raw data
     df = load_sms_data()
     

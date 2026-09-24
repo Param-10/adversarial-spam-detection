@@ -21,6 +21,11 @@ import os
 import argparse
 from datetime import datetime
 
+if __package__:
+    from .data_splits import load_data
+else:
+    from data_splits import load_data
+
 # Set device
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
@@ -101,7 +106,7 @@ class WeightedTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.class_weights = class_weights
     
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.get("labels")
         outputs = model(**inputs)
         logits = outputs.get("logits")
@@ -150,7 +155,7 @@ def fine_tune_bert_enhanced(train_dataset, val_dataset, class_weights=None,
         lr_scheduler_type="cosine",  # Cosine learning rate schedule
         dataloader_pin_memory=False,
         remove_unused_columns=False,
-        report_to=None,  # Disable wandb logging
+        report_to="none",  # Disable external experiment logging
     )
     
     # Create enhanced trainer with class weights, evaluating on validation set
@@ -199,31 +204,8 @@ def main():
     print("="*60)
     
     # Load data with strict train/val/test partitioning
-    train_df = pd.read_csv(args.train)
-    test_df = pd.read_csv(args.test)
-    
-    if args.val and os.path.exists(args.val):
-        val_df = pd.read_csv(args.val)
-    elif os.path.exists('data/val.csv'):
-        val_df = pd.read_csv('data/val.csv')
-    else:
-        from sklearn.model_selection import train_test_split
-        train_split, val_split = train_test_split(
-            train_df, test_size=0.15, random_state=42, stratify=train_df['label']
-        )
-        train_df = train_split.reset_index(drop=True)
-        val_df = val_split.reset_index(drop=True)
+    train_df, val_df, test_df = load_data(args.train, args.test, args.val)
 
-    # Check for duplicate message leakage across partitions
-    train_msgs = set(train_df['message'].astype(str))
-    val_msgs = set(val_df['message'].astype(str))
-    test_msgs = set(test_df['message'].astype(str))
-
-    leak_train_val = train_msgs.intersection(val_msgs)
-    leak_train_test = train_msgs.intersection(test_msgs)
-    if leak_train_val or leak_train_test:
-        train_df = train_df[~train_df['message'].astype(str).isin(leak_train_val | leak_train_test)].reset_index(drop=True)
-    
     print(f"Training samples: {len(train_df)}")
     print(f"Validation samples: {len(val_df)}")
     print(f"Test samples (untouched): {len(test_df)}")
@@ -262,4 +244,4 @@ def main():
             print(f"  test_{key[5:]}: {value:.4f}")
 
 if __name__ == "__main__":
-    main() 
+    main()
