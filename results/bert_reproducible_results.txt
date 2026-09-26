@@ -1,0 +1,15 @@
+BERT Spam Classification Results
+Trained: 2026-09-26 15:40:10
+Model: bert-base-uncased
+
+Accuracy: 0.9816
+Ham Precision: 0.9824
+Ham Recall: 0.9970
+Ham F1: 0.9896
+Spam Precision: 0.9753
+Spam Recall: 0.8681
+Spam F1: 0.9186
+
+Confusion Matrix:
+[[669 2]
+ [12 79]]
