@@ -25,31 +25,10 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-def load_data(train_path='data/train.csv', test_path='data/test.csv'):
-    """
-    Load preprocessed training and testing data.
-    
-    Args:
-        train_path (str): Path to training CSV
-        test_path (str): Path to testing CSV
-        
-    Returns:
-        tuple: (X_train, y_train, X_test, y_test)
-    """
-    print("Loading preprocessed data...")
-    
-    train_df = pd.read_csv(train_path)
-    test_df = pd.read_csv(test_path)
-    
-    X_train = train_df['message']
-    y_train = train_df['label']
-    X_test = test_df['message']
-    y_test = test_df['label']
-    
-    print(f"Train set: {len(X_train)} samples")
-    print(f"Test set: {len(X_test)} samples")
-    
-    return X_train, y_train, X_test, y_test
+if __package__:
+    from .data_splits import load_data
+else:
+    from data_splits import load_data
 
 def create_tfidf_vectorizer(max_features=5000, ngram_range=(1, 2)):
     """
@@ -282,6 +261,7 @@ def main():
     """Main training pipeline."""
     parser = argparse.ArgumentParser(description='Train baseline SMS spam classifiers')
     parser.add_argument('--train', default='data/train.csv', help='Training data path')
+    parser.add_argument('--val', default=None, help='Validation data path for model selection')
     parser.add_argument('--test', default='data/test.csv', help='Test data path')
     parser.add_argument('--output', default='models', help='Output directory for models')
     parser.add_argument('--plots', default='results', help='Directory to save plots')
@@ -292,7 +272,9 @@ def main():
     print("="*50)
     
     # Load data
-    X_train, y_train, X_test, y_test = load_data(args.train, args.test)
+    train_df, val_df, test_df = load_data(args.train, args.test, args.val)
+    X_train, y_train = train_df['message'], train_df['label']
+    X_val, y_val = val_df['message'], val_df['label']
     
     # Train models
     models = {}
@@ -300,25 +282,29 @@ def main():
     
     # Train Naive Bayes
     models['Naive Bayes'] = train_naive_bayes(X_train, y_train)
-    results['Naive Bayes'] = evaluate_model(models['Naive Bayes'], X_test, y_test, 'Naive Bayes')
+    results['Naive Bayes'] = evaluate_model(models['Naive Bayes'], X_val, y_val, 'Naive Bayes')
     
     # Train Logistic Regression
     models['Logistic Regression'] = train_logistic_regression(X_train, y_train)
-    results['Logistic Regression'] = evaluate_model(models['Logistic Regression'], X_test, y_test, 'Logistic Regression')
+    results['Logistic Regression'] = evaluate_model(models['Logistic Regression'], X_val, y_val, 'Logistic Regression')
     
     # Train SVM
     models['SVM'] = train_svm(X_train, y_train)
-    results['SVM'] = evaluate_model(models['SVM'], X_test, y_test, 'SVM')
+    results['SVM'] = evaluate_model(models['SVM'], X_val, y_val, 'SVM')
     
     # Compare models
     best_model_name, comparison_df = compare_models(results)
     
     # Save results
     os.makedirs(args.plots, exist_ok=True)
-    comparison_df.to_csv(os.path.join(args.plots, 'baseline_model_comparison.csv'), index=False)
+    comparison_df.to_csv(os.path.join(args.plots, 'baseline_validation_comparison.csv'), index=False)
     
-    # Save best model
-    save_best_model(results, best_model_name, args.output)
+    # Select on validation, then evaluate only the selected model on the holdout.
+    print('Final held-out test evaluation:')
+    test_result = evaluate_model(
+        models[best_model_name], test_df['message'], test_df['label'], best_model_name
+    )
+    save_best_model({best_model_name: test_result}, best_model_name, args.output)
     
     # Skip plotting confusion matrices
     

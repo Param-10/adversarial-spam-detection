@@ -9,7 +9,7 @@ This system implements a complete adversarial training pipeline that alternates 
 ### Key Components
 
 - **Baseline Classifiers**: Traditional ML models (Naive Bayes, Logistic Regression, SVM)
-- **Advanced BERT Classifier**: Pre-trained transformer model achieving 98.92% accuracy
+- **Advanced BERT Classifier**: Pre-trained transformer model reported at 98.92% accuracy (historical, predates the evaluation-split fix; not rerun with the current loader)
 - **Adversarial Generator**: Fine-tuned Qwen3-4B model for generating realistic spam samples
 - **Training Loop**: Iterative system that improves classifier robustness through adversarial examples
 
@@ -57,14 +57,14 @@ Prepare the dataset for training:
 python src/utils/data_preprocessing.py
 ```
 
-This creates `train.csv` and `test.csv` files in the `data/` directory.
+This creates deduplicated `train.csv`, `val.csv`, and `test.csv` files in the `data/` directory (approximately 70/15/15). Regenerating these files changes the historical partition and does not reproduce the old published metrics.
 
 ### Training Baseline Models
 
 Train traditional machine learning classifiers:
 
 ```bash
-python src/classifier/train_baseline.py --train data/train.csv --test data/test.csv
+python src/classifier/train_baseline.py --train data/train.csv --val data/val.csv --test data/test.csv
 ```
 
 ### Training BERT Model
@@ -72,7 +72,7 @@ python src/classifier/train_baseline.py --train data/train.csv --test data/test.
 Fine-tune BERT for spam classification:
 
 ```bash
-python src/classifier/train_bert.py --train data/train.csv --test data/test.csv --epochs 3
+python src/classifier/train_bert.py --train data/train.csv --val data/val.csv --test data/test.csv --epochs 3
 ```
 
 ### Adversarial Training Pipeline
@@ -91,7 +91,7 @@ For the complete adversarial training pipeline, use the Jupyter notebooks (desig
 
 **Notebook**: `notebooks/complete_loop_colab.ipynb`
 
-- Loads pre-trained BERT classifier (98.92% accuracy)
+- Loads pre-trained BERT classifier (historical 98.92% accuracy)
 - Loads trained Qwen3-4B generator
 - Implements full adversarial training system
 - Iteratively improves classifier robustness
@@ -107,7 +107,7 @@ For the complete adversarial training pipeline, use the Jupyter notebooks (desig
 
 ### Adversarial Training Process
 
-1. **Initial Setup**: Load pre-trained BERT classifier (98.92% baseline accuracy)
+1. **Initial Setup**: Load pre-trained BERT classifier (historical 98.92% baseline accuracy)
 2. **Generator Loading**: Load fine-tuned Qwen3-4B spam generator with LoRA adapters
 3. **Generation Phase**: Use Qwen3-4B to generate sophisticated adversarial spam samples
 4. **Evaluation Phase**: Test BERT classifier performance on generated samples
@@ -129,6 +129,12 @@ For the complete adversarial training pipeline, use the Jupyter notebooks (desig
 - **Chat Format**: Qwen3 conversation template (`<|im_start|>...<|im_end|>`)
 
 ## Results
+
+> **All figures in this Results section are historical.** They and the checked-in
+> model artifacts predate the evaluation-split fix (commit a6295bd) and were not
+> rerun with the current shared loader or the corrected train/validation/test
+> partitioning. They are retained for the record only; do not treat them as
+> current, reproducible results.
 
 ### Model Performance
 
@@ -171,15 +177,33 @@ Training history and performance improvements through adversarial iterations are
 | 2         | 91.7%          | 99.3%         | 48                | 4,545             |
 | 3         | 95.7%          | 96.5%         | 46                | 4,591             |
 
-**Key Findings & Robustness vs. Accuracy Tradeoff:**
+**Historical results and evaluation limitations:**
 
-1. **Successful Adversarial Challenge**: Initial detection rate of 91.7% confirms that the fine-tuned LLM generator produced subtle, challenging spam samples capable of probing classifier weaknesses.
-2. **Iterative Robustness Gains**: Adversarial detection rate improved from 91.7% → 95.7% across iterations, confirming the classifier adapted to previously evasive linguistic patterns.
-3. **The Clean vs. Robust Tradeoff**: While adversarial detection improved (+4.0%), clean test accuracy showed a modest decrease from 98.9% to 96.5% by Iteration 3. This illustrates a well-documented dynamic in adversarial ML: expanding classifier decision boundaries to encompass subtle adversarial perturbation often causes minor sensitivity shifts on border-line clean distributions.
-4. **Evaluation Partitioning & Leakage Prevention**:
-   - The training pipeline utilizes a strict **3-way split**: Training (70%), Validation (15%), and an untouched held-out Test set (15%).
-   - Model checkpoints and early stopping are governed strictly on the **Validation** set (`eval_dataset=val_dataset`, metric: `f1_spam`), ensuring that the Test set is never exposed during training or checkpoint selection.
-   - Cross-partition deduplication is strictly enforced to guarantee zero message leakage between partitions.
+These numbers and the checked-in model artifacts predate the evaluation-split fix.
+They have not been rerun or validated with the new partitioning. The Colab
+notebooks remain historical experiments and do not use the corrected CLI loader.
+
+The reported adversarial detection rate rises from 91.7% to 95.7% (4.0 percentage
+points), while clean accuracy falls from 98.9% to 96.5% (2.4 percentage points).
+Different generated attack samples were used across iterations, so these figures
+alone do not establish a robustness improvement on a fixed held-out attack set.
+The cause of the clean-accuracy change has not been isolated experimentally.
+
+**Current CLI evaluation contract:**
+
+- Both BERT trainers select checkpoints using validation data. The baseline
+  runner also selects its model on validation before the final test evaluation.
+- An explicit `--val` path must exist. When omitted, `val.csv` beside the training
+  file is used; otherwise 15% of the remaining training rows become validation.
+  This fallback does not imply a 70/15/15 split of the original dataset.
+- Duplicate matching ignores case and repeated whitespace. Overlap is removed
+  from training/validation, preserving the test file. Conflicting labels and
+  unusable partitions fail explicitly. This does not detect semantic near-duplicates.
+- Previously used test data is not a new independent holdout simply because the
+  scripts changed. New performance claims require a fresh, documented evaluation.
+
+Run the offline regression tests with `python -m unittest discover -s tests -v`.
+They use synthetic data and mocked trainers; they do not download models or train them.
 
 **Generated Data Logging:**
 
