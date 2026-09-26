@@ -1,5 +1,7 @@
 # Adversarial Spam Detection
 
+[![Tests](https://github.com/Param-10/adversarial-spam-detection/actions/workflows/tests.yml/badge.svg)](https://github.com/Param-10/adversarial-spam-detection/actions/workflows/tests.yml)
+
 A machine learning project implementing adversarial training for robust SMS spam detection. This project by Group 5D for AI4ALL explores how iterative adversarial training can improve spam classifier resilience against sophisticated attacks.
 
 ## Project Overview
